@@ -8,12 +8,9 @@ from google.oauth2.service_account import Credentials
 # ==========================================
 st.set_page_config(page_title="Automação Razão Contabilístico", page_icon="📊", layout="wide")
 
-# Função para formatar números no padrão brasileiro (1.234,56)
 def formatar_br(valor):
     try:
-        # Coloca vírgula nos milhares (formato americano temporário)
         texto = f"{float(valor):,.2f}"
-        # Inverte: vírgula vira X, ponto vira vírgula, X vira ponto
         return texto.replace(",", "X").replace(".", ",").replace("X", ".")
     except:
         return valor
@@ -21,7 +18,6 @@ def formatar_br(valor):
 st.title("📊 Carregamento do Razão para o Google Sheets")
 st.write("Faça o carregamento (upload) do seu ficheiro. Valide os dados e edite informações em falta antes de enviar.")
 
-# 1. Componente para upload do ficheiro
 arquivo_upload = st.file_uploader("Selecione o ficheiro do Razão (CSV ou Excel)", type=["csv", "xlsx"])
 
 if arquivo_upload is not None:
@@ -43,7 +39,6 @@ if arquivo_upload is not None:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
 
-        # Tratar a data para o resumo
         if 'Data' in df.columns:
             df['Data_Real'] = pd.to_datetime(df['Data'], format='%d/%m/%Y', errors='coerce')
             df['Mês_Ano'] = df['Data_Real'].dt.strftime('%m/%Y')
@@ -54,20 +49,17 @@ if arquivo_upload is not None:
         # ==========================================
         contas_alvo = ['LICENCAS DE SOFTWARE', 'SERVICOS DE INFORMATICA']
 
-        # Passo 1: Contas de licenças/serviços (Usamos .copy() para evitar avisos do Pandas na edição)
         parte_1 = df[df['Descrição da Conta'].isin(contas_alvo)].copy()
 
-        # Passo 2: Outras contas (CR de TI)
         parte_2 = df[
             (~df['Descrição da Conta'].isin(contas_alvo)) & 
             (df['Descrição Centro de Resultado'].str.startswith('TI -'))
         ].copy()
 
         # ==========================================
-        # VERIFICAÇÃO E EDIÇÃO DE FORNECEDORES EM BRANCO (SÓ NA PARTE 1)
+        # VERIFICAÇÃO E EDIÇÃO DE FORNECEDORES
         # ==========================================
         if 'Fornecedor' in parte_1.columns:
-            # Encontrar quem é NaN, Vazio ou apenas a palavra "Fornecedor:"
             condicao_vazio = (
                 parte_1['Fornecedor'].isna() | 
                 parte_1['Fornecedor'].astype(str).str.strip().isin(['', 'nan', 'Fornecedor:', 'Fornecedor'])
@@ -79,7 +71,6 @@ if arquivo_upload is not None:
                 
                 colunas_mostrar = ['Data', 'Descrição da Conta', 'Historico', 'Fornecedor']
                 
-                # O data_editor permite digitar no ecrã. Bloqueamos a edição nas outras colunas.
                 df_editado = st.data_editor(
                     parte_1.loc[condicao_vazio, colunas_mostrar],
                     disabled=['Data', 'Descrição da Conta', 'Historico'],
@@ -87,14 +78,12 @@ if arquivo_upload is not None:
                     use_container_width=True
                 )
                 
-                # Atualiza a base real (parte_1) com os dados que digitou no ecrã
                 parte_1.update(df_editado['Fornecedor'])
 
-        # Junta as duas partes agora com os fornecedores corrigidos
         base_final = pd.concat([parte_1, parte_2])
 
         # ==========================================
-        # ECRÃ DE VALIDAÇÃO (ANTES DE ENVIAR)
+        # ECRÃ DE VALIDAÇÃO
         # ==========================================
         if base_final.empty:
             st.error("Nenhum dado encontrado com os critérios estipulados.")
@@ -102,19 +91,16 @@ if arquivo_upload is not None:
             st.markdown("---")
             st.subheader("🔎 Validação dos Totais (Por Mês)")
             
-            # Resumos
             resumo_p1 = parte_1.groupby('Mês_Ano')['Saldo'].sum().reset_index()
             resumo_p1.rename(columns={'Saldo': 'Licenças e Serv. Informática (R$)'}, inplace=True)
             
             resumo_p2 = parte_2.groupby('Mês_Ano')['Saldo'].sum().reset_index()
             resumo_p2.rename(columns={'Saldo': 'CR de TI - Outras Contas (R$)'}, inplace=True)
             
-            # Juntar e formatar os números para o padrão Brasil
             tabela_validacao = pd.merge(resumo_p1, resumo_p2, on='Mês_Ano', how='outer').fillna(0)
             tabela_validacao['Licenças e Serv. Informática (R$)'] = tabela_validacao['Licenças e Serv. Informática (R$)'].apply(formatar_br)
             tabela_validacao['CR de TI - Outras Contas (R$)'] = tabela_validacao['CR de TI - Outras Contas (R$)'].apply(formatar_br)
             
-            # hide_index=True remove a primeira coluna indicativa de 0, 1, 2...
             st.dataframe(tabela_validacao, hide_index=True, use_container_width=True)
             
             st.info("👆 Se os valores e fornecedores estiverem corretos, clique no botão abaixo para concluir.")
@@ -125,8 +111,16 @@ if arquivo_upload is not None:
             if st.button("Tudo certo! Validar e Enviar para o Sheets", type="primary"):
                 with st.spinner('A enviar os dados para o Google Sheets...'):
                     
-                    # Limpeza final antes de enviar
+                    # Limpeza final das colunas auxiliares
                     base_final = base_final.drop(columns=['Data_Real', 'Mês_Ano'], errors='ignore')
+                    
+                    # --- NOVIDADE AQUI: APARAR ESPAÇOS DO FORNECEDOR ---
+                    if 'Fornecedor' in base_final.columns:
+                        # O str.strip() remove os espaços invisíveis antes e depois do texto
+                        base_final['Fornecedor'] = base_final['Fornecedor'].astype(str).str.strip()
+                    
+                    # Tratar os campos vazios (NaN)
+                    base_final = base_final.replace("nan", "") # Garante que a palavra "nan" também suma
                     base_final = base_final.fillna("")
                     
                     dados_para_subir = base_final.values.tolist()
@@ -136,12 +130,10 @@ if arquivo_upload is not None:
                         "https://www.googleapis.com/auth/drive"
                     ]
                     
-                    # Lê as credenciais do cofre seguro do Streamlit (Secrets)
                     credenciais_dict = dict(st.secrets["gcp_service_account"])
                     credentials = Credentials.from_service_account_info(credenciais_dict, scopes=scopes)
                     client = gspread.authorize(credentials)
 
-                    # --- CONEXÃO COM A SUA PLANILHA OFICIAL ---
                     planilha = client.open("[Opex LATAM] - Base Realizado")
                     aba = planilha.worksheet("Razao")
 
