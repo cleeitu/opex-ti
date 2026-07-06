@@ -49,12 +49,18 @@ if arquivo_upload is not None:
         # ==========================================
         contas_alvo = ['LICENCAS DE SOFTWARE', 'SERVICOS DE INFORMATICA']
 
+        # Passo 1: Contas de licenças/serviços
         parte_1 = df[df['Descrição da Conta'].isin(contas_alvo)].copy()
 
-        parte_2 = df[
-            (~df['Descrição da Conta'].isin(contas_alvo)) & 
-            (df['Descrição Centro de Resultado'].str.startswith('TI -'))
-        ].copy()
+        # Passo 2: Outras contas (CR de TI) - REMOVENDO DEPRECIAÇÃO E AMORTIZAÇÃO
+        # O operador ~ inverve a seleção, ou wow seja, pega o que NÃO começa com os termos informados
+        filtro_cr_ti = df['Descrição Centro de Resultado'].str.startswith('TI -')
+        filtro_nao_licencas = ~df['Descrição da Conta'].isin(contas_alvo)
+        filtro_nao_depreciacao = ~df['Descrição da Conta'].str.startswith('DEPRECIAÇÃO DE IMOBILIZADO')
+        filtro_nao_amortizacao = ~df['Descrição da Conta'].str.startswith('AMORTIZAÇÃO')
+
+        # Combinando todas as regras para o CR de TI
+        parte_2 = df[filtro_cr_ti & filtro_nao_licencas & filtro_nao_depreciacao & filtro_nao_amortizacao].copy()
 
         # ==========================================
         # VERIFICAÇÃO E EDIÇÃO DE FORNECEDORES
@@ -80,6 +86,7 @@ if arquivo_upload is not None:
                 
                 parte_1.update(df_editado['Fornecedor'])
 
+        # Junta as duas partes (ambas agora devidamente limpas e com as exclusões)
         base_final = pd.concat([parte_1, parte_2])
 
         # ==========================================
@@ -114,13 +121,12 @@ if arquivo_upload is not None:
                     # Limpeza final das colunas auxiliares
                     base_final = base_final.drop(columns=['Data_Real', 'Mês_Ano'], errors='ignore')
                     
-                    # --- NOVIDADE AQUI: APARAR ESPAÇOS DO FORNECEDOR ---
+                    # Aparar espaços invisíveis do Fornecedor antes de subir
                     if 'Fornecedor' in base_final.columns:
-                        # O str.strip() remove os espaços invisíveis antes e depois do texto
                         base_final['Fornecedor'] = base_final['Fornecedor'].astype(str).str.strip()
                     
                     # Tratar os campos vazios (NaN)
-                    base_final = base_final.replace("nan", "") # Garante que a palavra "nan" também suma
+                    base_final = base_final.replace("nan", "")
                     base_final = base_final.fillna("")
                     
                     dados_para_subir = base_final.values.tolist()
