@@ -56,8 +56,8 @@ if arquivo_upload is not None:
         # O operador ~ inverve a seleção, ou wow seja, pega o que NÃO começa com os termos informados
         filtro_cr_ti = df['Descrição Centro de Resultado'].str.startswith('TI -')
         filtro_nao_licencas = ~df['Descrição da Conta'].isin(contas_alvo)
-        filtro_nao_depreciacao = ~df['Descrição da Conta'].str.startswith('DEPRECIAÇÃO DE IMOBILIZADO')
-        filtro_nao_amortizacao = ~df['Descrição da Conta'].str.startswith('AMORTIZAÇÃO')
+        filtro_nao_depreciacao = ~df['Descrição da Conta'].str.startswith('DEPRECIACAO DE IMOBILIZADO')
+        filtro_nao_amortizacao = ~df['Descrição da Conta'].str.startswith('AMORTIZACAO')
 
         # Combinando todas as regras para o CR de TI
         parte_2 = df[filtro_cr_ti & filtro_nao_licencas & filtro_nao_depreciacao & filtro_nao_amortizacao].copy()
