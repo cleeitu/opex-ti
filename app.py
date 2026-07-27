@@ -63,8 +63,8 @@ if arquivo_upload is not None:
         # Passo 2: Outras contas (CR de TI) - REMOVENDO DEPRECIAÇÃO E AMORTIZAÇÃO
         filtro_cr_ti = df['Descrição Centro de Resultado'].str.startswith('TI -')
         filtro_nao_licencas = ~df['Descrição da Conta'].isin(contas_alvo)
-        filtro_nao_depreciacao = ~df['Descrição da Conta'].str.startswith('DEPRECIAÇÃO DE IMOBILIZADO')
-        filtro_nao_amortizacao = ~df['Descrição da Conta'].str.startswith('AMORTIZAÇÃO')
+        filtro_nao_depreciacao = ~df['Descrição da Conta'].str.startswith('DEPRECIACAO DE IMOBILIZADO')
+        filtro_nao_amortizacao = ~df['Descrição da Conta'].str.startswith('AMORTIZACAO')
 
         parte_2 = df[filtro_cr_ti & filtro_nao_licencas & filtro_nao_depreciacao & filtro_nao_amortizacao].copy()
 
