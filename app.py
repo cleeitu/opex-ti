@@ -15,6 +15,33 @@ def formatar_br(valor):
     except:
         return valor
 
+@st.cache_data
+def processar_arquivo(arquivo):
+    """Lê e aplica a limpeza inicial no arquivo. O cache evita reprocessamento a cada clique."""
+    if arquivo.name.endswith('.csv'):
+        df = pd.read_csv(arquivo)
+    else:
+        df = pd.read_excel(arquivo)
+        
+    df = df.dropna(subset=['Conta'])
+    df['Descrição da Conta'] = df['Descrição da Conta'].astype(str).str.upper().str.strip()
+    df['Descrição Centro de Resultado'] = df['Descrição Centro de Resultado'].astype(str).str.upper().str.strip()
+    df['Saldo'] = pd.to_numeric(df['Saldo'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+    
+    for col in ['Debito', 'Crédito']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
+
+    if 'Data' in df.columns:
+        df['Data_Real'] = pd.to_datetime(df['Data'], format='%d/%m/%Y', errors='coerce')
+        df['Mês_Ano'] = df['Data_Real'].dt.strftime('%m/%Y')
+        df['Data'] = df['Data_Real'].dt.strftime('%d/%m/%Y')
+        
+    return df
+
+# ==========================================
+# INTERFACE PRINCIPAL
+# ==========================================
 st.title("📊 Carregamento do Razão para o Google Sheets")
 st.write("Faça o carregamento (upload) do seu ficheiro. Valide os dados e edite informações em falta antes de enviar.")
 
@@ -22,27 +49,8 @@ arquivo_upload = st.file_uploader("Selecione o ficheiro do Razão (CSV ou Excel)
 
 if arquivo_upload is not None:
     try:
-        # ==========================================
-        # LEITURA E LIMPEZA IMEDIATA
-        # ==========================================
-        if arquivo_upload.name.endswith('.csv'):
-            df = pd.read_csv(arquivo_upload)
-        else:
-            df = pd.read_excel(arquivo_upload)
-            
-        df = df.dropna(subset=['Conta'])
-        df['Descrição da Conta'] = df['Descrição da Conta'].astype(str).str.upper().str.strip()
-        df['Descrição Centro de Resultado'] = df['Descrição Centro de Resultado'].astype(str).str.upper().str.strip()
-        df['Saldo'] = pd.to_numeric(df['Saldo'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-        
-        for col in ['Debito', 'Crédito']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-
-        if 'Data' in df.columns:
-            df['Data_Real'] = pd.to_datetime(df['Data'], format='%d/%m/%Y', errors='coerce')
-            df['Mês_Ano'] = df['Data_Real'].dt.strftime('%m/%Y')
-            df['Data'] = df['Data_Real'].dt.strftime('%d/%m/%Y')
+        # Carrega os dados de forma otimizada usando a função com cache
+        df = processar_arquivo(arquivo_upload)
 
         # ==========================================
         # REGRAS DE FILTRAGEM
@@ -53,13 +61,11 @@ if arquivo_upload is not None:
         parte_1 = df[df['Descrição da Conta'].isin(contas_alvo)].copy()
 
         # Passo 2: Outras contas (CR de TI) - REMOVENDO DEPRECIAÇÃO E AMORTIZAÇÃO
-        # O operador ~ inverve a seleção, ou wow seja, pega o que NÃO começa com os termos informados
         filtro_cr_ti = df['Descrição Centro de Resultado'].str.startswith('TI -')
         filtro_nao_licencas = ~df['Descrição da Conta'].isin(contas_alvo)
-        filtro_nao_depreciacao = ~df['Descrição da Conta'].str.startswith('DEPRECIACAO DE IMOBILIZADO')
-        filtro_nao_amortizacao = ~df['Descrição da Conta'].str.startswith('AMORTIZACAO')
+        filtro_nao_depreciacao = ~df['Descrição da Conta'].str.startswith('DEPRECIAÇÃO DE IMOBILIZADO')
+        filtro_nao_amortizacao = ~df['Descrição da Conta'].str.startswith('AMORTIZAÇÃO')
 
-        # Combinando todas as regras para o CR de TI
         parte_2 = df[filtro_cr_ti & filtro_nao_licencas & filtro_nao_depreciacao & filtro_nao_amortizacao].copy()
 
         # ==========================================
@@ -77,6 +83,7 @@ if arquivo_upload is not None:
                 
                 colunas_mostrar = ['Data', 'Descrição da Conta', 'Historico', 'Fornecedor']
                 
+                # Armazena a edição do usuário na variável
                 df_editado = st.data_editor(
                     parte_1.loc[condicao_vazio, colunas_mostrar],
                     disabled=['Data', 'Descrição da Conta', 'Historico'],
@@ -84,9 +91,10 @@ if arquivo_upload is not None:
                     use_container_width=True
                 )
                 
+                # Atualiza parte_1 com as edições feitas na tela
                 parte_1.update(df_editado['Fornecedor'])
 
-        # Junta as duas partes (ambas agora devidamente limpas e com as exclusões)
+        # Junta as duas partes 
         base_final = pd.concat([parte_1, parte_2])
 
         # ==========================================
@@ -113,39 +121,57 @@ if arquivo_upload is not None:
             st.info("👆 Se os valores e fornecedores estiverem corretos, clique no botão abaixo para concluir.")
 
             # ==========================================
-            # BOTÃO DE ENVIO DEFINITIVO
+            # BOTÃO DE ENVIO DEFINITIVO PARA O SHEETS
             # ==========================================
             if st.button("Tudo certo! Validar e Enviar para o Sheets", type="primary"):
-                with st.spinner('A enviar os dados para o Google Sheets...'):
+                with st.spinner('A calcular a linha correta e enviar os dados para o Google Sheets...'):
                     
-                    # Limpeza final das colunas auxiliares
+                    # Limpeza final antes de enviar
                     base_final = base_final.drop(columns=['Data_Real', 'Mês_Ano'], errors='ignore')
                     
-                    # Aparar espaços invisíveis do Fornecedor antes de subir
                     if 'Fornecedor' in base_final.columns:
                         base_final['Fornecedor'] = base_final['Fornecedor'].astype(str).str.strip()
                     
-                    # Tratar os campos vazios (NaN)
                     base_final = base_final.replace("nan", "")
                     base_final = base_final.fillna("")
                     
+                    # Converter o DataFrame para lista de listas
                     dados_para_subir = base_final.values.tolist()
 
+                    # Autenticação na API do Google
                     scopes = [
                         "https://www.googleapis.com/auth/spreadsheets",
                         "https://www.googleapis.com/auth/drive"
                     ]
-                    
                     credenciais_dict = dict(st.secrets["gcp_service_account"])
                     credentials = Credentials.from_service_account_info(credenciais_dict, scopes=scopes)
                     client = gspread.authorize(credentials)
 
+                    # Abertura da planilha
                     planilha = client.open("[Opex LATAM] - Base Realizado")
                     aba = planilha.worksheet("Razao")
 
-                    aba.append_rows(dados_para_subir, value_input_option='USER_ENTERED')
+                    # ----------------------------------------------------
+                    # NOVA LÓGICA DE INSERÇÃO À PROVA DE FILTROS
+                    # ----------------------------------------------------
+                    # 1. Pega todas as linhas para descobrir o tamanho real
+                    todas_as_linhas = aba.get_all_values()
+                    proxima_linha_vazia = len(todas_as_linhas) + 1
+
+                    # 2. Garante que existem linhas suficientes na planilha
+                    linhas_necessarias = proxima_linha_vazia + len(dados_para_subir) - 1
+                    if linhas_necessarias > aba.row_count:
+                        aba.add_rows(linhas_necessarias - aba.row_count)
+
+                    # 3. Define a célula inicial exata (ex: "A150") e cola os dados
+                    intervalo = f"A{proxima_linha_vazia}"
+                    aba.update(
+                        range_name=intervalo, 
+                        values=dados_para_subir, 
+                        value_input_option='USER_ENTERED'
+                    )
                     
-                    st.success("✅ Dados processados e anexados ao Google Sheets com sucesso!")
+                    st.success(f"✅ Dados processados e anexados com sucesso a partir da linha {proxima_linha_vazia}!")
 
     except Exception as e:
         st.error(f"Ocorreu um erro durante a execução: {e}")
